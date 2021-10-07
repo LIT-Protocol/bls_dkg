@@ -49,7 +49,7 @@ fn create_generators<R: RngCore>(
     for peer_id in peer_ids.iter() {
         let key_gen = {
             let (key_gen, proposal) =
-                match KeyGen::initialize(peer_id.name(), threshold, names.clone()) {
+                match KeyGen::initialize(peer_id.name(), threshold, names.clone(), false) {
                     Ok(result) => result,
                     Err(err) => {
                         return Err(format_err!(

@@ -23,6 +23,7 @@ pub enum Message {
         m: usize,
         n: usize,
         member_list: BTreeSet<XorName>,
+        sharezero: bool,
     },
     Proposal {
         key_gen_id: u64,

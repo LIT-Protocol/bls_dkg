@@ -329,6 +329,7 @@ impl KeyGen {
         our_id: XorName,
         threshold: usize,
         names: BTreeSet<XorName>,
+        sharezero: bool,
     ) -> Result<(KeyGen, Message), Error> {
         if names.len() < threshold {
             return Err(Error::Unknown);
@@ -360,6 +361,7 @@ impl KeyGen {
                 m: threshold,
                 n: names.len(),
                 member_list: names,
+                sharezero: sharezero,
             },
         ))
     }
@@ -422,7 +424,8 @@ impl KeyGen {
                 m,
                 n,
                 member_list,
-            } => self.handle_initialization(rng, m, n, key_gen_id, member_list),
+                sharezero,
+            } => self.handle_initialization(rng, m, n, key_gen_id, member_list, sharezero),
             Message::Proposal { key_gen_id, part } => self.handle_proposal(key_gen_id, part),
             Message::Complaint {
                 key_gen_id,
@@ -446,6 +449,7 @@ impl KeyGen {
         n: usize,
         sender: u64,
         member_list: BTreeSet<XorName>,
+        sharezero: bool,
     ) -> Result<Vec<Message>, Error> {
         if self.phase != Phase::Initialization {
             return Err(Error::UnexpectedPhase {
@@ -463,7 +467,12 @@ impl KeyGen {
             self.phase = Phase::Contribution;
 
             let mut rng = rng_adapter::RngAdapter(&mut *rng);
-            let our_part = BivarPoly::random(self.threshold, &mut rng);
+            let our_part = if sharezero {
+                BivarPoly::random_zeroconstant(self.threshold, &mut rng)
+            } else {
+                BivarPoly::random(self.threshold, &mut rng)
+            };
+
             let ack = our_part.commitment();
             let encrypt = |(i, name): (usize, &XorName)| {
                 let row = our_part.row(i + 1);
