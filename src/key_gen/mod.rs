@@ -320,6 +320,7 @@ pub struct KeyGen {
     pending_complain_messages: Vec<Message>,
     /// Pending messages that cannot handle yet.
     pending_messages: Vec<Message>,
+    is_refresh: bool,
 }
 
 impl KeyGen {
@@ -352,6 +353,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names.clone(), threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
+            is_refresh: sharezero,
         };
 
         Ok((
@@ -1047,6 +1049,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names, threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
+            is_refresh: false,
         }
     }
 }
