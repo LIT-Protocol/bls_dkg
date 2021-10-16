@@ -873,6 +873,10 @@ impl KeyGen {
         self.phase == Phase::Finalization
     }
 
+    pub fn is_refresh(&self) -> bool {
+	self.is_refresh
+    }
+
     /// Returns the new secret key share and the public key set.
     pub fn generate_keys(&self) -> Option<(BTreeSet<XorName>, Outcome)> {
         if !self.is_finalized() {
