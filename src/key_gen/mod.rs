@@ -11,6 +11,7 @@ mod encryptor;
 pub mod message;
 pub mod outcome;
 mod rng_adapter;
+pub mod sharexorname;
 
 #[cfg(test)]
 mod tests;
@@ -874,7 +875,7 @@ impl KeyGen {
     }
 
     pub fn is_refresh(&self) -> bool {
-	self.is_refresh
+        self.is_refresh
     }
 
     /// Returns the new secret key share and the public key set.
