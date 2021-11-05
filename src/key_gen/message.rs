@@ -8,6 +8,7 @@
 // Software.
 
 use super::encryptor::{Iv, Key};
+use super::sharexorname::ShareXorName;
 use super::{Acknowledgment, Part};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +21,7 @@ use xor_name::XorName;
 pub enum Message {
     Initialization {
         key_gen_id: u64,
+        context: ShareXorName,
         m: usize,
         n: usize,
         member_list: BTreeSet<XorName>,
@@ -27,19 +29,23 @@ pub enum Message {
     },
     Proposal {
         key_gen_id: u64,
+        context: ShareXorName,
         part: Part,
     },
     Complaint {
         key_gen_id: u64,
         target: u64,
+        context: ShareXorName,
         msg: Vec<u8>,
     },
     Justification {
         key_gen_id: u64,
+        context: ShareXorName,
         keys_map: BTreeMap<XorName, (Key, Iv)>,
     },
     Acknowledgment {
         key_gen_id: u64,
+        context: ShareXorName,
         ack: Acknowledgment,
     },
 }

@@ -30,6 +30,7 @@ use message::Message;
 use outcome::Outcome;
 use rand::{self, RngCore};
 use serde_derive::{Deserialize, Serialize};
+use sharexorname::ShareXorName;
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::{
     fmt::{self, Debug, Formatter},
@@ -62,6 +63,12 @@ pub enum Error {
     /// Unexpected phase.
     #[error("Unexpected phase")]
     UnexpectedPhase { expected: Phase, actual: Phase },
+    /// Mismatched context.
+    #[error("Mismatched context")]
+    ContextMismatch {
+        expected: ShareXorName,
+        actual: ShareXorName,
+    },
     /// Ack on a missed part.
     #[error("ACK on missed part")]
     MissingPart,
@@ -78,6 +85,8 @@ impl From<Box<bincode::ErrorKind>> for Error {
 pub struct Part {
     // Index of the peer that expected to receive this Part.
     receiver: u64,
+    // Context of this index
+    context: ShareXorName,
     // Our poly-commitment.
     commitment: BivarCommitment,
     // serialized row for the receiver.
@@ -90,6 +99,7 @@ impl Debug for Part {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Part")
             .field(&format!("<receiver {}>", &self.receiver))
+            .field(&format!("<context {:?}>", &self.context))
             .field(&format!("<degree {}>", self.commitment.degree()))
             .field(&format!("<{} rows>", self.enc_rows.len()))
             .finish()
@@ -126,6 +136,8 @@ struct ProposalState {
     enc_values: Vec<Vec<u8>>,
     /// The nodes which have committed.
     acks: BTreeSet<u64>,
+    /// The context for the node u64 values in self.values and self.acks
+    context: ShareXorName,
 }
 
 impl ProposalState {
@@ -136,6 +148,7 @@ impl ProposalState {
             values: BTreeMap::new(),
             enc_values: Vec::new(),
             acks: BTreeSet::new(),
+            context: ShareXorName::from_xornames(Vec::new()), // may need to know this, look at callsite
         }
     }
 
@@ -146,7 +159,8 @@ impl ProposalState {
 
 impl<'a> serde::Deserialize<'a> for ProposalState {
     fn deserialize<D: serde::Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
-        let (commitment, values, enc_values, acks) = serde::Deserialize::deserialize(deserializer)?;
+        let (commitment, values, enc_values, acks, context) =
+            serde::Deserialize::deserialize(deserializer)?;
         let values: Vec<(u64, FieldWrap<Fr>)> = values;
         Ok(Self {
             commitment,
@@ -156,6 +170,7 @@ impl<'a> serde::Deserialize<'a> for ProposalState {
                 .collect(),
             enc_values,
             acks,
+            context,
         })
     }
 }
@@ -180,9 +195,10 @@ pub enum Phase {
     Finalization,
 }
 
-#[derive(Default)]
+//#[derive(Default)]
 struct InitializationAccumulator {
     senders: BTreeSet<u64>,
+    context: ShareXorName,
     initializations: BTreeMap<(usize, usize, BTreeSet<XorName>), usize>,
 }
 
@@ -190,6 +206,7 @@ impl InitializationAccumulator {
     fn new() -> InitializationAccumulator {
         InitializationAccumulator {
             senders: BTreeSet::new(),
+            context: ShareXorName::from_xornames(Vec::new()), // may need to know this, look at callsite
             initializations: BTreeMap::new(),
         }
     }
@@ -303,6 +320,8 @@ pub struct KeyGen {
     our_id: XorName,
     /// Our node index.
     our_index: u64,
+    /// The context matching indices with XorNames
+    context: ShareXorName,
     /// The names of all nodes, by node ID.
     names: BTreeSet<XorName>,
     /// Carry out encryption work during the DKG process.
@@ -329,6 +348,7 @@ impl KeyGen {
     /// multicast to all nodes.
     pub fn initialize(
         our_id: XorName,
+        context: ShareXorName,
         threshold: usize,
         names: BTreeSet<XorName>,
         sharezero: bool,
@@ -336,7 +356,8 @@ impl KeyGen {
         if names.len() < threshold {
             return Err(Error::Unknown);
         }
-        let our_index = if let Some(index) = names.iter().position(|id| *id == our_id) {
+
+        let our_index = if let Some(index) = context.get_share(our_id) {
             index as u64
         } else {
             return Err(Error::Unknown);
@@ -345,6 +366,7 @@ impl KeyGen {
         let key_gen = KeyGen {
             our_id,
             our_index,
+            context: context.clone(),
             names: names.clone(),
             encryptor: Encryptor::new(&names),
             parts: BTreeMap::new(),
@@ -361,6 +383,7 @@ impl KeyGen {
             key_gen,
             Message::Initialization {
                 key_gen_id: our_index,
+                context: context,
                 m: threshold,
                 n: names.len(),
                 member_list: names,
@@ -424,22 +447,33 @@ impl KeyGen {
         match msg {
             Message::Initialization {
                 key_gen_id,
+                context,
                 m,
                 n,
                 member_list,
                 sharezero,
-            } => self.handle_initialization(rng, m, n, key_gen_id, member_list, sharezero),
-            Message::Proposal { key_gen_id, part } => self.handle_proposal(key_gen_id, part),
+            } => self.handle_initialization(rng, m, n, key_gen_id, context, member_list, sharezero),
+            Message::Proposal {
+                key_gen_id,
+                context,
+                part,
+            } => self.handle_proposal(key_gen_id, context, part),
             Message::Complaint {
                 key_gen_id,
                 target,
+                context,
                 msg,
-            } => self.handle_complaint(key_gen_id, target, msg),
+            } => self.handle_complaint(key_gen_id, target, context, msg),
             Message::Justification {
                 key_gen_id,
+                context,
                 keys_map,
-            } => self.handle_justification(key_gen_id, keys_map),
-            Message::Acknowledgment { key_gen_id, ack } => self.handle_ack(key_gen_id, ack),
+            } => self.handle_justification(key_gen_id, context, keys_map),
+            Message::Acknowledgment {
+                key_gen_id,
+                context,
+                ack,
+            } => self.handle_ack(key_gen_id, context, ack),
         }
     }
 
@@ -451,9 +485,16 @@ impl KeyGen {
         m: usize,
         n: usize,
         sender: u64,
+        context: ShareXorName,
         member_list: BTreeSet<XorName>,
         sharezero: bool,
     ) -> Result<Vec<Message>, Error> {
+        if self.context != context {
+            return Err(Error::ContextMismatch {
+                expected: self.context.clone(),
+                actual: context,
+            });
+        }
         if self.phase != Phase::Initialization {
             return Err(Error::UnexpectedPhase {
                 expected: Phase::Initialization,
@@ -482,21 +523,30 @@ impl KeyGen {
                 self.encryptor.encrypt(name, &serialize(&row)?)
             };
             let rows = self
-                .names
+                .context
+                .get_pairs()
                 .iter()
-                .enumerate()
-                .map(encrypt)
+                .map(|(name, i)| encrypt((*i as usize, name)))
                 .collect::<Result<Vec<_>, Error>>()?;
+            // let rows = self
+            //     .names
+            //     .iter()
+            //     .enumerate()
+            //     .map(encrypt)
+            //     .collect::<Result<Vec<_>, Error>>()?;
+
             let result = self
-                .names
+                .context
+                .get_pairs()
                 .iter()
-                .enumerate()
-                .map(|(idx, _pk)| {
+                .map(|(_pk, idx)| {
                     let ser_row = serialize(&our_part.row(idx + 1))?;
                     Ok(Message::Proposal {
                         key_gen_id: self.our_index,
+                        context: self.context.clone(),
                         part: Part {
-                            receiver: idx as u64,
+                            receiver: *idx as u64,
+                            context: self.context.clone(),
                             commitment: ack.clone(),
                             ser_row,
                             enc_rows: rows.clone(),
@@ -504,6 +554,26 @@ impl KeyGen {
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?;
+
+            // let result = self
+            //     .names
+            //     .iter()
+            //     .enumerate()
+            //     .map(|(idx, _pk)| {
+            //         let ser_row = serialize(&our_part.row(idx + 1))?;
+            //         Ok(Message::Proposal {
+            //             key_gen_id: self.our_index,
+            //             context: context,
+            //             part: Part {
+            //                 receiver: idx as u64,
+            //                 context: context,
+            //                 commitment: ack.clone(),
+            //                 ser_row,
+            //                 enc_rows: rows.clone(),
+            //             },
+            //         })
+            //     })
+            //     .collect::<Result<Vec<_>, Error>>()?;
             return Ok(result);
         }
         Ok(Vec::new())
@@ -512,7 +582,18 @@ impl KeyGen {
     // Handles a `Proposal` message during the `Contribution` phase.
     // When there is an invalidation happens, holds the `Complaint` message till broadcast out
     // when `finalize_contributing` being called.
-    fn handle_proposal(&mut self, sender_index: u64, part: Part) -> Result<Vec<Message>, Error> {
+    fn handle_proposal(
+        &mut self,
+        sender_index: u64,
+        context: ShareXorName,
+        part: Part,
+    ) -> Result<Vec<Message>, Error> {
+        if self.context != context {
+            return Err(Error::ContextMismatch {
+                expected: self.context.clone(),
+                actual: context,
+            });
+        }
         if !(self.phase == Phase::Contribution || self.phase == Phase::Commitment) {
             return Err(Error::UnexpectedPhase {
                 expected: Phase::Contribution,
@@ -526,6 +607,7 @@ impl KeyGen {
             Err(_fault) => {
                 let msg = Message::Proposal {
                     key_gen_id: sender_index,
+                    context,
                     part,
                 };
                 debug!(
@@ -536,6 +618,7 @@ impl KeyGen {
                 self.pending_complain_messages.push(Message::Complaint {
                     key_gen_id: self.our_index,
                     target: sender_index,
+                    context: self.context.clone(),
                     msg: invalid_contribute,
                 });
                 return Ok(Vec::new());
@@ -545,23 +628,31 @@ impl KeyGen {
         // The row is valid. Encrypt one value for each node and broadcast `Acknowledgment`.
         let mut values = Vec::new();
         let mut enc_values = Vec::new();
-        for (index, pk) in self.names.iter().enumerate() {
+        for (pk, index) in self.context.get_pairs().iter() {
+            //        for (index, pk) in self.names.iter().enumerate() {
             let val = row.evaluate(index + 1);
             let ser_val = serialize(&FieldWrap(val))?;
             enc_values.push(self.encryptor.encrypt(pk, &ser_val)?);
             values.push(ser_val);
         }
 
+        // let result = self
+        //     .names
+        //     .iter()
+        //     .enumerate()
+        //     .map(|(idx, _pk)| Message::Acknowledgment {
+
         let result = self
-            .names
+            .context
+            .get_pairs()
             .iter()
-            .enumerate()
-            .map(|(idx, _pk)| Message::Acknowledgment {
+            .map(|(_pk, idx)| Message::Acknowledgment {
                 key_gen_id: self.our_index,
+                context: self.context.clone(),
                 ack: Acknowledgment(
                     sender_index,
-                    idx as u64,
-                    values[idx].clone(),
+                    *idx as u64,
+                    values[*idx as usize].clone(),
                     enc_values.clone(),
                 ),
             })
@@ -575,8 +666,15 @@ impl KeyGen {
     fn handle_ack(
         &mut self,
         sender_index: u64,
+        context: ShareXorName,
         ack: Acknowledgment,
     ) -> Result<Vec<Message>, Error> {
+        if self.context != context {
+            return Err(Error::ContextMismatch {
+                expected: self.context.clone(),
+                actual: context,
+            });
+        }
         if !(self.phase == Phase::Contribution || self.phase == Phase::Commitment) {
             return Err(Error::UnexpectedPhase {
                 expected: Phase::Contribution,
@@ -604,6 +702,7 @@ impl KeyGen {
             Err(fault) => {
                 let msg = Message::Acknowledgment {
                     key_gen_id: sender_index,
+                    context: context.clone(),
                     ack,
                 };
                 debug!(
@@ -615,6 +714,7 @@ impl KeyGen {
                 self.pending_complain_messages.push(Message::Complaint {
                     key_gen_id: self.our_index,
                     target: sender_index,
+                    context,
                     msg: invalid_ack,
                 });
             }
@@ -641,6 +741,7 @@ impl KeyGen {
             self.pending_complain_messages.push(Message::Complaint {
                 key_gen_id: self.our_index,
                 target: non_contributor,
+                context: self.context.clone(),
                 msg: b"Not contributed".to_vec(),
             });
         }
@@ -665,18 +766,19 @@ impl KeyGen {
         let mut non_idxes = BTreeSet::new();
         let mut non_ids = BTreeSet::new();
         let mut missing_times = BTreeMap::new();
-        for (idx, name) in self.names.iter().enumerate() {
-            if let Some(proposal_sate) = self.parts.get(&(idx as u64)) {
-                if !proposal_sate.acks.contains(&(idx as u64)) {
+        //for (idx, name) in self.names.iter().enumerate() {
+        for (name, idx) in self.context.get_pairs().iter() {
+            if let Some(proposal_sate) = self.parts.get(&(*idx as u64)) {
+                if !proposal_sate.acks.contains(&(*idx as u64)) {
                     let times = missing_times.entry(idx).or_insert_with(|| 0);
                     *times += 1;
                     if *times > self.names.len() / 2 {
-                        let _ = non_idxes.insert(idx as u64);
+                        let _ = non_idxes.insert(*idx as u64);
                         let _ = non_ids.insert(*name);
                     }
                 }
             } else {
-                let _ = non_idxes.insert(idx as u64);
+                let _ = non_idxes.insert(*idx as u64);
                 let _ = non_ids.insert(*name);
             }
         }
@@ -725,8 +827,16 @@ impl KeyGen {
         &mut self,
         sender_index: u64,
         target_index: u64,
+        context: ShareXorName,
         invalid_msg: Vec<u8>,
     ) -> Result<Vec<Message>, Error> {
+        if self.context != context {
+            return Err(Error::ContextMismatch {
+                expected: self.context.clone(),
+                actual: context,
+            });
+        }
+
         if self.phase != Phase::Complaining {
             return Err(Error::UnexpectedPhase {
                 expected: Phase::Complaining,
@@ -766,6 +876,7 @@ impl KeyGen {
         if failings.contains(&self.our_id) {
             result.push(Message::Justification {
                 key_gen_id: self.our_index,
+                context: self.context.clone(),
                 keys_map: self.encryptor.keys_map(),
             });
         }
@@ -797,19 +908,30 @@ impl KeyGen {
             let row = our_part.row(i + 1);
             self.encryptor.encrypt(name, &serialize(&row)?)
         };
+
         let rows = self
-            .names
+            .context
+            .get_pairs()
             .iter()
-            .enumerate()
-            .map(encrypt)
+            .map(|(name, i)| encrypt((*i as usize, name)))
             .collect::<Result<Vec<_>, Error>>()?;
 
-        self.names.iter().enumerate().for_each(|(idx, _pk)| {
+        // let rows = self
+        //     .names
+        //     .iter()
+        //     .enumerate()
+        //     .map(encrypt)
+        //     .collect::<Result<Vec<_>, Error>>()?;
+
+        //        self.names.iter().enumerate().for_each(|(idx, _pk)| {
+        self.context.get_pairs().iter().for_each(|(_pk, idx)| {
             if let Ok(ser_row) = serialize(&our_part.row(idx + 1)) {
                 result.push(Message::Proposal {
                     key_gen_id: self.our_index,
+                    context: self.context.clone(),
                     part: Part {
-                        receiver: idx as u64,
+                        receiver: *idx as u64,
+                        context: self.context.clone(),
                         commitment: justify.clone(),
                         ser_row,
                         enc_rows: rows.clone(),
@@ -825,9 +947,16 @@ impl KeyGen {
     fn handle_justification(
         &mut self,
         _sender_index: u64,
+        context: ShareXorName,
         _keys_map: BTreeMap<XorName, (Key, Iv)>,
     ) -> Result<Vec<Message>, Error> {
         // TODO: Need to decide how the justification and recover procedure take out.
+        if self.context != context {
+            return Err(Error::ContextMismatch {
+                expected: self.context.clone(),
+                actual: context,
+            });
+        }
         Ok(Vec::new())
     }
 
@@ -839,20 +968,22 @@ impl KeyGen {
 
     /// Returns the index of the node, or `None` if it is unknown.
     fn node_index(&self, node_id: &XorName) -> Option<u64> {
-        self.names
-            .iter()
-            .position(|id| id == node_id)
-            .map(|index| index as u64)
+        // self.names
+        //     .iter()
+        //     .position(|id| id == node_id)
+        //     .map(|index| index as u64)
+        self.context.get_share(*node_id)
     }
 
     /// Returns the id of the index, or `None` if it is unknown.
     fn node_id_from_index(&self, node_index: u64) -> Option<XorName> {
-        for (i, name) in self.names.iter().enumerate() {
-            if i == node_index as usize {
-                return Some(*name);
-            }
-        }
-        None
+        // for (i, name) in self.names.iter().enumerate() {
+        //     if i == node_index as usize {
+        //         return Some(*name);
+        //     }
+        // }
+        // None
+        self.context.get_xorname(node_index)
     }
 
     /// Returns the number of complete parts. If this is at least `threshold + 1`, the keys can
@@ -906,11 +1037,12 @@ impl KeyGen {
         let mut result = BTreeSet::new();
         match self.phase {
             Phase::Initialization => {
-                for (index, name) in self.names.iter().enumerate() {
+                // for (index, name) in self.names.iter().enumerate() {
+                for (name, index) in self.context.get_pairs().iter() {
                     if !self
                         .initalization_accumulator
                         .senders
-                        .contains(&(index as u64))
+                        .contains(&(*index as u64))
                     {
                         let _ = result.insert(*name);
                     }
@@ -926,8 +1058,9 @@ impl KeyGen {
                 // in these two phases. Hence here a strict rule is undertaken that: any missing
                 // vote will be considered as a potential non-voter.
                 for part in self.parts.values() {
-                    for (index, name) in self.names.iter().enumerate() {
-                        if !part.acks.contains(&(index as u64)) {
+                    // for (index, name) in self.names.iter().enumerate() {
+                    for (name, index) in self.context.get_pairs().iter() {
+                        if !part.acks.contains(&(*index as u64)) {
                             let _ = result.insert(*name);
                         }
                     }
@@ -946,11 +1079,19 @@ impl KeyGen {
         sender_index: u64,
         Part {
             receiver,
+            context,
             commitment,
             ser_row,
             enc_rows,
         }: Part,
     ) -> Result<Option<Poly>, PartFault> {
+        // if self.context != context {
+        //     return Err(Error::ContextMismatch {
+        //         expected: self.context,
+        //         actual: context,
+        //     });
+        // }
+
         if enc_rows.len() != self.names.len() {
             return Err(PartFault::RowCount);
         }
@@ -1037,6 +1178,7 @@ impl KeyGen {
     pub fn initialize_for_test(
         our_id: XorName,
         our_index: u64,
+        context: ShareXorName,
         names: BTreeSet<XorName>,
         threshold: usize,
         phase: Phase,
@@ -1045,6 +1187,7 @@ impl KeyGen {
         KeyGen {
             our_id,
             our_index,
+            context,
             names: names.clone(),
             encryptor: Encryptor::new(&names),
             parts: BTreeMap::new(),

@@ -1,14 +1,29 @@
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use xor_name::xor_name;
 use xor_name::XorName;
 
-use xor_name::xor_name;
+/// In bls_dkg, it is assumed the u64 index of a node is constant and can be derived from a constant
+/// list of XorNames, with the index the position in the sorted list.  This index is cast to Fr
+/// and polynomials evaluated at it.  We replace this u64 with a wrapper struct that tracks the context.
+// #[derive(Debug, Clone, PartialEq, Eq,Ord)]
+// pub struct IndexWithContext {
+//     pub my_share: u64,
+//     pub context: ShareXorName,
+// }
+
+// impl PartialOrd for IndexWithContext {
+//     fn partial_cmp(&self, _: &Rhs) -> std::option::Option<std::cmp::Ordering> {
+// 	todo!()
+//     }
+// }
 
 /// ShareXorName is a struct to manage adding and removing XorNames that participate in the DKG.
 /// It aims to not reassign shares, and to reuse previously assigned shares, although it does not
 /// currently remember names that dropped off so as to try to give them back their old share.
 /// There is a lot of possibility for leaking more shares than intended here, so be careful.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct ShareXorName {
     pub xornames: Vec<XorName>,
     pub shares: Vec<u64>, // really Fr, but for compatibility use u64, or T: IntoFr
@@ -26,7 +41,7 @@ impl ShareXorName {
         xornames.sort();
         ShareXorName {
             xornames,
-            shares: (1..=length).map(|x| x as u64).collect(),
+            shares: (0..length).map(|x| x as u64).collect(),
             available: Vec::<u64>::new(),
         }
         // no sort is needed
@@ -50,6 +65,24 @@ impl ShareXorName {
             .into_iter()
             .zip(self.shares.clone())
             .collect()
+    }
+
+    pub fn get_share(&self, xorname: XorName) -> Option<u64> {
+        if let Some(position) = self.xornames.iter().position(|&name| name == xorname) {
+            let share = self.shares[position];
+            Some(share)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_xorname(&self, share: u64) -> Option<XorName> {
+        if let Some(position) = self.shares.iter().position(|&ashare| ashare == share) {
+            let xorname = self.xornames[position];
+            Some(xorname)
+        } else {
+            None
+        }
     }
 
     // remove an xorname if present, placing its share in available pool
@@ -81,7 +114,7 @@ impl ShareXorName {
             self.xornames.push(xorname);
             self.shares.push(share);
         } else {
-            let share = (self.xornames.len() + 1) as u64; // +1 to take next open share
+            let share = (self.xornames.len() + 0) as u64; // +1 to take next open share
             self.xornames.push(xorname);
             self.shares.push(share);
         }
@@ -101,9 +134,9 @@ impl ShareXorName {
                 self.xornames.push(xorname);
                 self.shares.push(share);
             } else {
-                next_share += 1;
                 self.xornames.push(xorname);
                 self.shares.push(next_share);
+                next_share += 1;
             }
         }
         self.sort()
@@ -148,13 +181,13 @@ mod tests {
         let names: Vec<XorName> = (1..5).map(|i| xor_name!(i)).collect();
         let mut sxn2 = ShareXorName::from_xornames(Vec::new());
         let mut sxn3 = ShareXorName::from_xornames(Vec::new());
-        sxn2.add_xornames(names.clone());
-        sxn3.iteradd_xornames(names.clone());
+        sxn2.add_xornames(names.clone()); // all at once (FIX)
+        sxn3.iteradd_xornames(names.clone()); // one at a time
         println!("{:?}", sxn2);
-        assert_eq!(sxn3, sxn2);
+        assert_eq!(sxn3, sxn2, "sxn3 {:?} sxn2 {:?}", sxn3, sxn2);
 
         let mut sxn = ShareXorName::from_xornames(names);
-        assert_eq!(sxn, sxn2);
+        assert_eq!(sxn, sxn2, "sxn1 {:?} sxn2 {:?}", sxn, sxn2);
 
         println!("1 {:?}", sxn);
         println!("2 {:?}", sxn2);

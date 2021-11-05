@@ -9,6 +9,7 @@
 
 use crate::dev_utils::{create_ids, PeerId};
 use crate::key_gen::{message::Message, Error, KeyGen};
+use crate::sharexorname::ShareXorName;
 use anyhow::{format_err, Result};
 use bincode::serialize;
 use blsttc::{PublicKeySet, SignatureShare};
@@ -42,23 +43,29 @@ fn create_generators<R: RngCore>(
 ) -> Result<Vec<KeyGen>> {
     // Generate individual key pairs.
     let names: BTreeSet<XorName> = peer_ids.iter().map(|peer_id| peer_id.name()).collect();
+    let context = ShareXorName::from_xornames(names.clone().into_iter().collect());
 
     // Create the `KeyGen` instances
     let mut generators = Vec::new();
     let mut proposals = Vec::new();
     for peer_id in peer_ids.iter() {
         let key_gen = {
-            let (key_gen, proposal) =
-                match KeyGen::initialize(peer_id.name(), threshold, names.clone(), false) {
-                    Ok(result) => result,
-                    Err(err) => {
-                        return Err(format_err!(
-                            "Failed to initialize KeyGen of {:?} {:?}",
-                            &peer_id,
-                            err
-                        ))
-                    }
-                };
+            let (key_gen, proposal) = match KeyGen::initialize(
+                peer_id.name(),
+                context.clone(),
+                threshold,
+                names.clone(),
+                false,
+            ) {
+                Ok(result) => result,
+                Err(err) => {
+                    return Err(format_err!(
+                        "Failed to initialize KeyGen of {:?} {:?}",
+                        &peer_id,
+                        err
+                    ))
+                }
+            };
             proposals.push(proposal);
             key_gen
         };
