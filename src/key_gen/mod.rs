@@ -396,6 +396,10 @@ impl KeyGen {
         self.phase
     }
 
+    pub fn context(&self) -> ShareXorName {
+        self.context.clone()
+    }
+
     /// Dispatching an incoming dkg message.
     pub fn handle_message<R: RngCore>(
         &mut self,
