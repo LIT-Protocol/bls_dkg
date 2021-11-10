@@ -1163,6 +1163,17 @@ impl KeyGen {
 
         Ok(())
     }
+
+    pub fn add_xornames(&mut self, xornames: Vec<XorName>) {
+        self.context.add_xornames(xornames.clone());
+        self.names.extend(xornames.iter());
+    }
+    pub fn remove_xornames(&mut self, xornames: Vec<XorName>) {
+        self.context.remove_xornames(xornames.clone());
+        xornames.into_iter().for_each(move |elem| {
+            self.names.remove(&elem);
+        });
+    }
 }
 
 impl Debug for KeyGen {
