@@ -84,12 +84,13 @@ impl From<Box<bincode::ErrorKind>> for Error {
 #[derive(Deserialize, Serialize, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Part {
     // Index of the peer that expected to receive this Part.
+    // Starts from zero; receiver+1 will be evaluated.
     receiver: u64,
     // Context of this index
     context: ShareXorName,
     // Our poly-commitment.
     commitment: BivarCommitment,
-    // serialized row for the receiver.
+    // serialized row for the receiver. serialize(&our_part.row(idx + 1))?;
     ser_row: Vec<u8>,
     // Encrypted rows from the sender.
     enc_rows: Vec<Vec<u8>>,

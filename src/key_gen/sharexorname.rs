@@ -86,7 +86,7 @@ impl ShareXorName {
     }
 
     // remove an xorname if present, placing its share in available pool
-    fn remove_xorname(&mut self, xorname: XorName) {
+    pub fn remove_xorname(&mut self, xorname: XorName) {
         if let Some(position) = self.xornames.iter().position(|&name| name == xorname) {
             let share = self.shares[position];
             self.xornames.remove(position);

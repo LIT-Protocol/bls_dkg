@@ -90,6 +90,7 @@ fn messaging<R: RngCore>(
         let proposals_local = std::mem::take(proposals);
         for proposal in &proposals_local {
             for (index, generator) in generators.iter_mut().enumerate() {
+                // // // FIX
                 if let Ok(proposal_vec) = generator.handle_message(&mut rng, proposal.clone()) {
                     if !non_responsives.contains(&(index as u64)) {
                         proposal_vec
@@ -134,6 +135,7 @@ fn having_max_unresponsive_nodes_still_work() -> Result<()> {
         // finalize_complaining_phase to be called externally to complete the procedure.
         for _ in 0..2 {
             peer_ids.iter().enumerate().for_each(|(index, _peer_id)| {
+                // // // FIX
                 if let Ok(proposal_vec) = generators[index].timed_phase_transition(&mut rng) {
                     if !non_responsives.contains(&(index as u64)) {
                         for proposal in proposal_vec {
@@ -167,6 +169,7 @@ fn having_max_unresponsive_nodes_still_work() -> Result<()> {
         let mut sig_shares: BTreeMap<usize, SignatureShare> = BTreeMap::new();
 
         for (index, key_gen) in generators.iter_mut().enumerate() {
+            // // // FIX
             if !non_responsives.contains(&(index as u64)) {
                 let outcome = if let Some(outcome) = key_gen.generate_keys() {
                     outcome.1
@@ -221,6 +224,7 @@ fn having_min_unresponsive_nodes_cause_block() -> Result<()> {
 
     // Trigger `finalize_contributing_phase` first, and exchange complaints
     peer_ids.iter().enumerate().for_each(|(index, _peer_id)| {
+        // // // FIX
         if let Ok(proposal_vec) = generators[index].timed_phase_transition(&mut rng) {
             if !non_responsives.contains(&(index as u64)) {
                 for proposal in proposal_vec {
@@ -238,6 +242,7 @@ fn having_min_unresponsive_nodes_cause_block() -> Result<()> {
 
     // Then trigger `finalize_complaining_phase`, phase shall be blocked due to too many non-voters.
     for (index, peer_id) in peer_ids.iter().enumerate() {
+        // // // FIX
         if let Err(err) = generators[index].timed_phase_transition(&mut rng) {
             assert_eq!(err, Error::TooManyNonVoters(non_responsives.clone()));
         } else {
@@ -268,6 +273,7 @@ fn threshold_signature() -> Result<()> {
 
     let mut sig_shares = BTreeMap::new();
     for (idx, generator) in generators.iter().enumerate() {
+        // // // // FIX
         assert!(generator.is_ready());
         let outcome = if let Some(outcome) = generator.generate_keys() {
             outcome.1
@@ -349,6 +355,7 @@ fn threshold_encrypt() -> Result<()> {
     let mut dec_shares = BTreeMap::new();
 
     for (idx, generator) in generators.iter().enumerate() {
+        // // // FIX
         assert!(generator.is_ready());
         let outcome = if let Some(outcome) = generator.generate_keys() {
             outcome.1
