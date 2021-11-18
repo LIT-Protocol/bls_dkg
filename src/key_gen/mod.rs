@@ -9,6 +9,7 @@
 
 mod encryptor;
 pub mod message;
+pub mod mode;
 pub mod outcome;
 mod rng_adapter;
 pub mod sharexorname;
@@ -22,11 +23,12 @@ use blsttc::{
     group::CurveAffine,
     poly::{BivarCommitment, BivarPoly, Poly},
     serde_impl::FieldWrap,
-    Fr, G1Affine,
+    Fr, G1Affine, IntoFr,
 };
 pub use blsttc::{PublicKeySet, SecretKeyShare};
 use encryptor::{Encryptor, Iv, Key};
 use message::Message;
+use mode::Mode;
 use outcome::Outcome;
 use rand::{self, RngCore};
 use serde_derive::{Deserialize, Serialize};
@@ -341,7 +343,7 @@ pub struct KeyGen {
     pending_complain_messages: Vec<Message>,
     /// Pending messages that cannot handle yet.
     pending_messages: Vec<Message>,
-    is_refresh: bool,
+    mode: Mode, // sharezero
 }
 
 impl KeyGen {
@@ -352,7 +354,7 @@ impl KeyGen {
         context: ShareXorName,
         threshold: usize,
         names: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode,
     ) -> Result<(KeyGen, Message), Error> {
         if names.len() < threshold {
             return Err(Error::Unknown);
@@ -377,7 +379,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names.clone(), threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
-            is_refresh: sharezero,
+            mode: mode.clone(), //is_refresh: sharezero,
         };
 
         Ok((
@@ -388,7 +390,7 @@ impl KeyGen {
                 m: threshold,
                 n: names.len(),
                 member_list: names,
-                sharezero: sharezero,
+                mode: mode, //sharezero: sharezero,
             },
         ))
     }
@@ -456,8 +458,8 @@ impl KeyGen {
                 m,
                 n,
                 member_list,
-                sharezero,
-            } => self.handle_initialization(rng, m, n, key_gen_id, context, member_list, sharezero),
+                mode,
+            } => self.handle_initialization(rng, m, n, key_gen_id, context, member_list, mode),
             Message::Proposal {
                 key_gen_id,
                 context,
@@ -492,7 +494,7 @@ impl KeyGen {
         sender: u64,
         context: ShareXorName,
         member_list: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode, //sharezero: bool,
     ) -> Result<Vec<Message>, Error> {
         if self.context != context {
             return Err(Error::ContextMismatch {
@@ -516,10 +518,18 @@ impl KeyGen {
             self.phase = Phase::Contribution;
 
             let mut rng = rng_adapter::RngAdapter(&mut *rng);
-            let our_part = if sharezero {
-                BivarPoly::random_zeroconstant(self.threshold, &mut rng)
-            } else {
-                BivarPoly::random(self.threshold, &mut rng)
+            let our_part = match mode {
+                // If this in an initial keygen, we generate a new random bivariate polynomial,
+                // including a new constant term.
+                Mode::Initial => BivarPoly::random(self.threshold, &mut rng),
+                // If it is a refresh, we generate a new random bivariate polynomial, but with
+                // zero constant term.
+                Mode::Refresh => BivarPoly::random_zeroconstant(self.threshold, &mut rng),
+                // If it is a recovery,
+                Mode::Recovery(shareindex) => {
+                    let r: Fr = shareindex.into_fr();
+                    BivarPoly::random_zero_at(self.threshold, r, &mut rng)
+                }
             };
 
             let ack = our_part.commitment();
@@ -1011,7 +1021,7 @@ impl KeyGen {
     }
 
     pub fn is_refresh(&self) -> bool {
-        self.is_refresh
+        self.mode == Mode::Refresh
     }
 
     /// Returns the new secret key share and the public key set.
@@ -1213,7 +1223,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names, threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
-            is_refresh: false,
+            mode: Mode::Initial,
         }
     }
 }

@@ -8,6 +8,7 @@
 // Software.
 
 use crate::dev_utils::{create_ids, PeerId};
+use crate::key_gen::mode::Mode;
 use crate::key_gen::{message::Message, Error, KeyGen};
 use crate::sharexorname::ShareXorName;
 use anyhow::{format_err, Result};
@@ -55,7 +56,7 @@ fn create_generators<R: RngCore>(
                 context.clone(),
                 threshold,
                 names.clone(),
-                false,
+                Mode::Initial,
             ) {
                 Ok(result) => result,
                 Err(err) => {

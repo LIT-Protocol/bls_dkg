@@ -8,6 +8,7 @@
 // Software.
 
 use super::encryptor::{Iv, Key};
+use super::mode::Mode;
 use super::sharexorname::ShareXorName;
 use super::{Acknowledgment, Part};
 use serde_derive::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ pub enum Message {
         m: usize,
         n: usize,
         member_list: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode,
     },
     Proposal {
         key_gen_id: u64,
