@@ -399,6 +399,10 @@ impl KeyGen {
         self.phase
     }
 
+    pub fn mode(&self) -> Mode {
+        self.mode.clone()
+    }
+
     pub fn context(&self) -> ShareXorName {
         self.context.clone()
     }
