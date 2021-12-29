@@ -98,12 +98,13 @@ impl ShareXorName {
     }
     // remove xornames if present, placing shares in available pool
     pub fn remove_xornames(&mut self, rem_xornames: Vec<XorName>) {
-        let shares = Vec::<u64>::new();
+        let mut offset: usize = 0;
         for (position, name) in self.xornames.clone().iter().enumerate() {
             if rem_xornames.contains(name) {
-                self.available.push(self.shares[position]);
-                self.xornames.remove(position);
-                self.shares.remove(position);
+                self.available.push(self.shares[position - offset]);
+                self.xornames.remove(position - offset);
+                self.shares.remove(position - offset);
+                offset += 1;
             }
         }
         self.available.sort_by(|a, b| b.cmp(a)); // sort() and reverse()
