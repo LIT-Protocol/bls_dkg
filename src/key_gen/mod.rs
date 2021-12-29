@@ -87,7 +87,7 @@ impl From<Box<bincode::ErrorKind>> for Error {
 pub struct Part {
     // Index of the peer that expected to receive this Part.
     // Starts from zero; receiver+1 will be evaluated.
-    receiver: u64,
+    pub receiver: u64,
     // Context of this index
     context: ShareXorName,
     // Our poly-commitment.
@@ -116,7 +116,7 @@ impl Debug for Part {
 /// For each node, it contains `proposal_index, receiver_index, serialised value for the receiver,
 /// encrypted values from the sender`.
 #[derive(Deserialize, Serialize, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub struct Acknowledgment(u64, u64, Vec<u8>, Vec<Vec<u8>>);
+pub struct Acknowledgment(u64, pub u64, Vec<u8>, Vec<Vec<u8>>);
 
 impl Debug for Acknowledgment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -403,6 +403,10 @@ impl KeyGen {
         self.mode.clone()
     }
 
+    pub fn our_index(&self) -> u64 {
+        self.our_index
+    }
+
     pub fn context(&self) -> ShareXorName {
         self.context.clone()
     }
@@ -645,14 +649,14 @@ impl KeyGen {
         };
 
         // The row is valid. Encrypt one value for each node and broadcast `Acknowledgment`.
-        let mut values = Vec::new();
-        let mut enc_values = Vec::new();
-        for (pk, index) in self.context.get_pairs().iter() {
+        let mut values = BTreeMap::new(); //Vec::new();
+        let mut enc_values = BTreeMap::new();
+        for (pk, index) in self.context.get_pairs() {
             //        for (index, pk) in self.names.iter().enumerate() {
             let val = row.evaluate(index + 1);
             let ser_val = serialize(&FieldWrap(val))?;
-            enc_values.push(self.encryptor.encrypt(pk, &ser_val)?);
-            values.push(ser_val);
+            enc_values.insert(index, self.encryptor.encrypt(&pk, &ser_val)?); //implicit mapping was here, position is index.  replace with explicit mapping.
+            values.insert(index, ser_val);
         }
 
         // let result = self
@@ -671,8 +675,8 @@ impl KeyGen {
                 ack: Acknowledgment(
                     sender_index,
                     *idx as u64,
-                    values[*idx as usize].clone(),
-                    enc_values.clone(),
+                    values[idx].clone(),
+                    enc_values.values().cloned().collect::<Vec<Vec<u8>>>(), //fix
                 ),
             })
             .collect();
@@ -1193,7 +1197,7 @@ impl KeyGen {
 
 impl Debug for KeyGen {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "KeyGen{{{:?}}}", self.our_id)
+        write!(formatter, "KeyGen{{{:?}{:?}}}", self.our_id, self.mode)
     }
 }
 
