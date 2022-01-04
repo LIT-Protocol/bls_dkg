@@ -34,6 +34,7 @@ use rand::{self, RngCore};
 use serde_derive::{Deserialize, Serialize};
 use sharexorname::ShareXorName;
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::iter::FromIterator;
 use std::{
     fmt::{self, Debug, Formatter},
     mem,
@@ -393,6 +394,39 @@ impl KeyGen {
                 mode: mode, //sharezero: sharezero,
             },
         ))
+    }
+
+    /// Creates a new `KeyGen` instance with specified data, e.g. for use after a recovery.
+    pub fn initialize_as_final(
+        our_id: XorName,
+        context: ShareXorName,
+        threshold: usize,
+    ) -> Result<KeyGen, Error> {
+        let our_index = if let Some(index) = context.get_share(our_id) {
+            index as u64
+        } else {
+            return Err(Error::Unknown);
+        };
+
+        let names: BTreeSet<XorName> = BTreeSet::from_iter(context.clone().xornames);
+
+        let key_gen = KeyGen {
+            our_id,
+            our_index,
+            context: context.clone(),
+            names: names.clone(),
+            encryptor: Encryptor::new(&names),
+            parts: BTreeMap::new(),
+            threshold,
+            phase: Phase::Finalization,
+            initalization_accumulator: InitializationAccumulator::new(),
+            complaints_accumulator: ComplaintsAccumulator::new(names.clone(), threshold),
+            pending_complain_messages: Vec::new(),
+            pending_messages: Vec::new(),
+            mode: Mode::Initial, //is_refresh: sharezero,
+        };
+
+        Ok(key_gen)
     }
 
     pub fn phase(&self) -> Phase {
