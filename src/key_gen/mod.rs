@@ -569,7 +569,7 @@ impl KeyGen {
                 Mode::Refresh => BivarPoly::random_zeroconstant(self.threshold, &mut rng),
                 // If it is a recovery,
                 Mode::Recovery(shareindex) => {
-                    let r: Fr = shareindex.into_fr();
+                    let r: Fr = (shareindex + 1).into_fr();
                     BivarPoly::random_zero_at(self.threshold, r, &mut rng)
                 }
             };
