@@ -28,7 +28,7 @@ pub struct ShareXorName {
     pub xornames: Vec<XorName>,
     pub shares: Vec<u64>, // really Fr, but for compatibility use u64, or T: IntoFr
     pub available: Vec<u64>, //in decreasing order, so popping gives lowest-value share
-    pub epochid: u64,     // an opaque epoch id; mismatched ids is a context mismatch error.
+    pub keygenid: [u8; 32], // an opaque epoch id; mismatched ids is a context mismatch error.
 }
 
 impl ShareXorName {
@@ -44,7 +44,7 @@ impl ShareXorName {
             xornames,
             shares: (0..length).map(|x| x as u64).collect(),
             available: Vec::<u64>::new(),
-            epochid: 0,
+            keygenid: [0u8; 32],
         }
         // no sort is needed
     }
@@ -155,11 +155,11 @@ impl ShareXorName {
         self.add_xornames(to_add);
     }
 
-    pub fn get_epoch(&self) -> u64 {
-        self.epochid
+    pub fn get_keygenid(&self) -> [u8; 32] {
+        self.keygenid
     }
-    pub fn set_epoch(&mut self, epochid: u64) {
-        self.epochid = epochid
+    pub fn set_epoch(&mut self, keygenid: [u8; 32]) {
+        self.keygenid = keygenid;
     }
 }
 
