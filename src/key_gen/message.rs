@@ -111,7 +111,7 @@ impl Message {
             } => context,
         }
     }
-    pub fn get_epoch(&self) -> [u8; 32] {
+    pub fn get_keygenid(&self) -> [u8; 32] {
         self.get_context().keygenid
     }
 }
