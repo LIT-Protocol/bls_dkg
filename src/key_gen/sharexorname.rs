@@ -158,7 +158,7 @@ impl ShareXorName {
     pub fn get_keygenid(&self) -> [u8; 32] {
         self.keygenid
     }
-    pub fn set_epoch(&mut self, keygenid: [u8; 32]) {
+    pub fn set_keygenid(&mut self, keygenid: [u8; 32]) {
         self.keygenid = keygenid;
     }
 }
