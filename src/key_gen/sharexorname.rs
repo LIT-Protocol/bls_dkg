@@ -158,6 +158,9 @@ impl ShareXorName {
     pub fn get_epoch(&self) -> u64 {
         self.epochid
     }
+    pub fn set_epoch(&mut self, epochid: u64) {
+        self.epochid = epochid
+    }
 }
 
 #[cfg(test)]
