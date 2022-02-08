@@ -76,3 +76,42 @@ impl fmt::Debug for Message {
         }
     }
 }
+
+impl Message {
+    pub fn get_context(&self) -> &ShareXorName {
+        match &self {
+            Message::Initialization {
+                key_gen_id: _,
+                context,
+                m: _,
+                n: _,
+                member_list: _,
+                mode: _,
+            } => context,
+            Message::Proposal {
+                key_gen_id: _,
+                context,
+                part: _,
+            } => context,
+            Message::Complaint {
+                key_gen_id: _,
+                target: _,
+                context,
+                msg: _,
+            } => context,
+            Message::Justification {
+                key_gen_id: _,
+                context,
+                keys_map: _,
+            } => context,
+            Message::Acknowledgment {
+                key_gen_id: _,
+                context,
+                ack: _,
+            } => context,
+        }
+    }
+    pub fn get_epoch(&self) -> u64 {
+        self.get_context().epochid
+    }
+}
