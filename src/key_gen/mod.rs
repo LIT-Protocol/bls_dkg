@@ -17,6 +17,7 @@ pub mod sharexorname;
 #[cfg(test)]
 mod tests;
 
+use base64;
 use bincode::{self, deserialize, serialize};
 use blsttc::{
     ff::Field,
@@ -1231,7 +1232,13 @@ impl KeyGen {
 
 impl Debug for KeyGen {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "KeyGen{{{:?}{:?}}}", self.our_id, self.mode)
+        write!(
+            formatter,
+            "KeyGen{{{:?}:{:?}:{}}}",
+            self.our_index,
+            self.mode,
+            &base64::encode(self.context().get_keygenid())[..8]
+        )
     }
 }
 
