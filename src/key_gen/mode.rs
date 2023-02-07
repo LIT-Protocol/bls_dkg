@@ -5,4 +5,6 @@ pub enum Mode {
     Initial,
     Refresh,
     Recovery(u64),
+    IncreaseThresholdTo(usize),
+    DecreaseThresholdTo(usize),
 }

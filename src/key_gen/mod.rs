@@ -568,10 +568,24 @@ impl KeyGen {
                 // If it is a refresh, we generate a new random bivariate polynomial, but with
                 // zero constant term.
                 Mode::Refresh => BivarPoly::random_zeroconstant(self.threshold, &mut rng),
-                // If it is a recovery,
+                // If it is a recovery, we generate a new random bivariate polynomial with
+                // zero at the desired evaluation point for the new share
                 Mode::Recovery(shareindex) => {
                     let r: Fr = (shareindex + 1).into_fr();
                     BivarPoly::random_zero_at(self.threshold, r, &mut rng)
+                }
+                // If it is a threshold increase, we generate a new random bivariate polynomial with
+                // zero constant term, and the new degree.
+                Mode::IncreaseThresholdTo(new_threshold) => {
+                    assert!(new_threshold > self.threshold);
+                    assert!(new_threshold <= self.names.len());
+                    BivarPoly::random_zeroconstant(new_threshold, &mut rng)
+                }
+                // If it is a threshold reduction, we generate a new random bivariate polynomial
+                // as a blinding polynomial (no particular roots) with the desired new degree
+                Mode::DecreaseThresholdTo(new_threshold) => {
+                    assert!(new_threshold < self.threshold);
+                    BivarPoly::random(new_threshold, &mut rng)
                 }
             };
 
