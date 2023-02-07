@@ -8,6 +8,7 @@
 // Software.
 
 use super::encryptor::{Iv, Key};
+use super::mode::Mode;
 use super::sharexorname::ShareXorName;
 use super::{Acknowledgment, Part};
 use serde_derive::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ pub enum Message {
         m: usize,
         n: usize,
         member_list: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode,
     },
     Proposal {
         key_gen_id: u64,
@@ -73,5 +74,44 @@ impl fmt::Debug for Message {
                 write!(formatter, "Acknowledgment({})", key_gen_id)
             }
         }
+    }
+}
+
+impl Message {
+    pub fn get_context(&self) -> &ShareXorName {
+        match &self {
+            Message::Initialization {
+                key_gen_id: _,
+                context,
+                m: _,
+                n: _,
+                member_list: _,
+                mode: _,
+            } => context,
+            Message::Proposal {
+                key_gen_id: _,
+                context,
+                part: _,
+            } => context,
+            Message::Complaint {
+                key_gen_id: _,
+                target: _,
+                context,
+                msg: _,
+            } => context,
+            Message::Justification {
+                key_gen_id: _,
+                context,
+                keys_map: _,
+            } => context,
+            Message::Acknowledgment {
+                key_gen_id: _,
+                context,
+                ack: _,
+            } => context,
+        }
+    }
+    pub fn get_keygenid(&self) -> [u8; 32] {
+        self.get_context().keygenid
     }
 }

@@ -28,6 +28,7 @@ pub struct ShareXorName {
     pub xornames: Vec<XorName>,
     pub shares: Vec<u64>, // really Fr, but for compatibility use u64, or T: IntoFr
     pub available: Vec<u64>, //in decreasing order, so popping gives lowest-value share
+    pub keygenid: [u8; 32], // an opaque epoch id; mismatched ids is a context mismatch error.
 }
 
 impl ShareXorName {
@@ -43,6 +44,7 @@ impl ShareXorName {
             xornames,
             shares: (0..length).map(|x| x as u64).collect(),
             available: Vec::<u64>::new(),
+            keygenid: [0u8; 32],
         }
         // no sort is needed
     }
@@ -98,12 +100,13 @@ impl ShareXorName {
     }
     // remove xornames if present, placing shares in available pool
     pub fn remove_xornames(&mut self, rem_xornames: Vec<XorName>) {
-        let shares = Vec::<u64>::new();
+        let mut offset: usize = 0;
         for (position, name) in self.xornames.clone().iter().enumerate() {
             if rem_xornames.contains(name) {
-                self.available.push(self.shares[position]);
-                self.xornames.remove(position);
-                self.shares.remove(position);
+                self.available.push(self.shares[position - offset]);
+                self.xornames.remove(position - offset);
+                self.shares.remove(position - offset);
+                offset += 1;
             }
         }
         self.available.sort_by(|a, b| b.cmp(a)); // sort() and reverse()
@@ -150,6 +153,13 @@ impl ShareXorName {
         let to_add: Vec<XorName> = new.difference(&old).cloned().collect();
         self.remove_xornames(to_remove);
         self.add_xornames(to_add);
+    }
+
+    pub fn get_keygenid(&self) -> [u8; 32] {
+        self.keygenid
+    }
+    pub fn set_keygenid(&mut self, keygenid: [u8; 32]) {
+        self.keygenid = keygenid;
     }
 }
 

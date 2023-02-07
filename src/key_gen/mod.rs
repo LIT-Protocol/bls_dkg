@@ -9,6 +9,7 @@
 
 mod encryptor;
 pub mod message;
+pub mod mode;
 pub mod outcome;
 mod rng_adapter;
 pub mod sharexorname;
@@ -16,22 +17,25 @@ pub mod sharexorname;
 #[cfg(test)]
 mod tests;
 
+use base64;
 use bincode::{self, deserialize, serialize};
 use blsttc::{
     ff::Field,
     group::CurveAffine,
     poly::{BivarCommitment, BivarPoly, Poly},
     serde_impl::FieldWrap,
-    Fr, G1Affine,
+    Fr, G1Affine, IntoFr,
 };
 pub use blsttc::{PublicKeySet, SecretKeyShare};
 use encryptor::{Encryptor, Iv, Key};
 use message::Message;
+use mode::Mode;
 use outcome::Outcome;
 use rand::{self, RngCore};
 use serde_derive::{Deserialize, Serialize};
 use sharexorname::ShareXorName;
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::iter::FromIterator;
 use std::{
     fmt::{self, Debug, Formatter},
     mem,
@@ -85,7 +89,7 @@ impl From<Box<bincode::ErrorKind>> for Error {
 pub struct Part {
     // Index of the peer that expected to receive this Part.
     // Starts from zero; receiver+1 will be evaluated.
-    receiver: u64,
+    pub receiver: u64,
     // Context of this index
     context: ShareXorName,
     // Our poly-commitment.
@@ -114,7 +118,7 @@ impl Debug for Part {
 /// For each node, it contains `proposal_index, receiver_index, serialised value for the receiver,
 /// encrypted values from the sender`.
 #[derive(Deserialize, Serialize, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub struct Acknowledgment(u64, u64, Vec<u8>, Vec<Vec<u8>>);
+pub struct Acknowledgment(u64, pub u64, Vec<u8>, Vec<Vec<u8>>);
 
 impl Debug for Acknowledgment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -341,7 +345,7 @@ pub struct KeyGen {
     pending_complain_messages: Vec<Message>,
     /// Pending messages that cannot handle yet.
     pending_messages: Vec<Message>,
-    is_refresh: bool,
+    mode: Mode, // sharezero
 }
 
 impl KeyGen {
@@ -352,7 +356,7 @@ impl KeyGen {
         context: ShareXorName,
         threshold: usize,
         names: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode,
     ) -> Result<(KeyGen, Message), Error> {
         if names.len() < threshold {
             return Err(Error::Unknown);
@@ -377,7 +381,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names.clone(), threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
-            is_refresh: sharezero,
+            mode: mode.clone(), //is_refresh: sharezero,
         };
 
         Ok((
@@ -388,13 +392,54 @@ impl KeyGen {
                 m: threshold,
                 n: names.len(),
                 member_list: names,
-                sharezero: sharezero,
+                mode: mode, //sharezero: sharezero,
             },
         ))
     }
 
+    /// Creates a new `KeyGen` instance with specified data, e.g. for use after a recovery.
+    pub fn initialize_as_final(
+        our_id: XorName,
+        context: ShareXorName,
+        threshold: usize,
+    ) -> Result<KeyGen, Error> {
+        let our_index = if let Some(index) = context.get_share(our_id) {
+            index as u64
+        } else {
+            return Err(Error::Unknown);
+        };
+
+        let names: BTreeSet<XorName> = BTreeSet::from_iter(context.clone().xornames);
+
+        let key_gen = KeyGen {
+            our_id,
+            our_index,
+            context: context.clone(),
+            names: names.clone(),
+            encryptor: Encryptor::new(&names),
+            parts: BTreeMap::new(),
+            threshold,
+            phase: Phase::Finalization,
+            initalization_accumulator: InitializationAccumulator::new(),
+            complaints_accumulator: ComplaintsAccumulator::new(names.clone(), threshold),
+            pending_complain_messages: Vec::new(),
+            pending_messages: Vec::new(),
+            mode: Mode::Initial, //is_refresh: sharezero,
+        };
+
+        Ok(key_gen)
+    }
+
     pub fn phase(&self) -> Phase {
         self.phase
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode.clone()
+    }
+
+    pub fn our_index(&self) -> u64 {
+        self.our_index
     }
 
     pub fn context(&self) -> ShareXorName {
@@ -456,8 +501,8 @@ impl KeyGen {
                 m,
                 n,
                 member_list,
-                sharezero,
-            } => self.handle_initialization(rng, m, n, key_gen_id, context, member_list, sharezero),
+                mode,
+            } => self.handle_initialization(rng, m, n, key_gen_id, context, member_list, mode),
             Message::Proposal {
                 key_gen_id,
                 context,
@@ -492,7 +537,7 @@ impl KeyGen {
         sender: u64,
         context: ShareXorName,
         member_list: BTreeSet<XorName>,
-        sharezero: bool,
+        mode: Mode, //sharezero: bool,
     ) -> Result<Vec<Message>, Error> {
         if self.context != context {
             return Err(Error::ContextMismatch {
@@ -516,10 +561,18 @@ impl KeyGen {
             self.phase = Phase::Contribution;
 
             let mut rng = rng_adapter::RngAdapter(&mut *rng);
-            let our_part = if sharezero {
-                BivarPoly::random_zeroconstant(self.threshold, &mut rng)
-            } else {
-                BivarPoly::random(self.threshold, &mut rng)
+            let our_part = match mode {
+                // If this in an initial keygen, we generate a new random bivariate polynomial,
+                // including a new constant term.
+                Mode::Initial => BivarPoly::random(self.threshold, &mut rng),
+                // If it is a refresh, we generate a new random bivariate polynomial, but with
+                // zero constant term.
+                Mode::Refresh => BivarPoly::random_zeroconstant(self.threshold, &mut rng),
+                // If it is a recovery,
+                Mode::Recovery(shareindex) => {
+                    let r: Fr = (shareindex + 1).into_fr();
+                    BivarPoly::random_zero_at(self.threshold, r, &mut rng)
+                }
             };
 
             let ack = our_part.commitment();
@@ -631,14 +684,14 @@ impl KeyGen {
         };
 
         // The row is valid. Encrypt one value for each node and broadcast `Acknowledgment`.
-        let mut values = Vec::new();
-        let mut enc_values = Vec::new();
-        for (pk, index) in self.context.get_pairs().iter() {
+        let mut values = BTreeMap::new(); //Vec::new();
+        let mut enc_values = BTreeMap::new();
+        for (pk, index) in self.context.get_pairs() {
             //        for (index, pk) in self.names.iter().enumerate() {
             let val = row.evaluate(index + 1);
             let ser_val = serialize(&FieldWrap(val))?;
-            enc_values.push(self.encryptor.encrypt(pk, &ser_val)?);
-            values.push(ser_val);
+            enc_values.insert(index, self.encryptor.encrypt(&pk, &ser_val)?); //implicit mapping was here, position is index.  replace with explicit mapping.
+            values.insert(index, ser_val);
         }
 
         // let result = self
@@ -657,8 +710,8 @@ impl KeyGen {
                 ack: Acknowledgment(
                     sender_index,
                     *idx as u64,
-                    values[*idx as usize].clone(),
-                    enc_values.clone(),
+                    values[idx].clone(),
+                    enc_values.values().cloned().collect::<Vec<Vec<u8>>>(), //fix
                 ),
             })
             .collect();
@@ -1011,7 +1064,7 @@ impl KeyGen {
     }
 
     pub fn is_refresh(&self) -> bool {
-        self.is_refresh
+        self.mode == Mode::Refresh
     }
 
     /// Returns the new secret key share and the public key set.
@@ -1179,7 +1232,13 @@ impl KeyGen {
 
 impl Debug for KeyGen {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "KeyGen{{{:?}}}", self.our_id)
+        write!(
+            formatter,
+            "KeyGen{{{:?}:{:?}:{}}}",
+            self.our_index,
+            self.mode,
+            &base64::encode(self.context().get_keygenid())[..8]
+        )
     }
 }
 
@@ -1213,7 +1272,7 @@ impl KeyGen {
             complaints_accumulator: ComplaintsAccumulator::new(names, threshold),
             pending_complain_messages: Vec::new(),
             pending_messages: Vec::new(),
-            is_refresh: false,
+            mode: Mode::Initial,
         }
     }
 }
